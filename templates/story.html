@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>よみきかせ</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <a class="btn" href="/select">← もどる</a>
+      <a class="btn" href="/">🏠 トップ</a>
+    </div>
+
+    <h1 class="page-title" id="storyTitle">読み込み中…</h1>
+
+    <div class="cover">
+      <img id="coverImg" class="cover-img" alt="">
+      <div class="status" id="statusBox"></div>
+      <div class="controls" style="margin-top:10px;">
+        <button class="btn soft" id="regenCoverBtn" type="button">🖼 画像を自動生成</button>
+      </div>
+    </div>
+
+    <div class="line" id="lineBox">…</div>
+
+    <div class="controls">
+      <button class="btn primary" id="readBtn" type="button">📖 よむ（文字だけ）</button>
+      <button class="btn auto" id="autoBtn" type="button">▶ じどう（音声）：OFF</button>
+      <button class="btn" id="stopBtn" type="button">⏹ とめる</button>
+    </div>
+
+    <div class="small">じどうのときだけ音声が出ます（声：nova）</div>
+  </div>
+
+  <script src="/static/js/stories.js"></script>
+  <script>
+    // theme の決定（URL優先 → テンプレ → デフォルト）
+    const u = new URL(location.href);
+    const THEME = u.searchParams.get("theme") || ("{{ theme }}" || "").trim() || "red";
+
+    const titleEl = document.getElementById("storyTitle");
+    const coverImg = document.getElementById("coverImg");
+    const statusBox = document.getElementById("statusBox");
+    const lineBox  = document.getElementById("lineBox");
+    const readBtn  = document.getElementById("readBtn");
+    const autoBtn  = document.getElementById("autoBtn");
+    const stopBtn  = document.getElementById("stopBtn");
+    const regenCoverBtn = document.getElementById("regenCoverBtn");
+
+    let idx = 0;
+    let autoMode = false;
+    let currentAudio = null;
+
+    function setStatus(msg, kind=""){
+      statusBox.className = "status " + kind;
+      statusBox.textContent = msg || "";
+    }
+
+    function stopAudio(){
+      if(currentAudio){
+        currentAudio.pause();
+        currentAudio = null;
+      }
+    }
+
+    function getStory(){
+      const all = window.STORIES || null;
+      if(!all) return null;
+      return all[THEME] || null;
+    }
+
+    function clampIndex(s){
+      if(!s) return 0;
+      if(idx < 0) idx = 0;
+      if(idx > s.lines.length - 1) idx = s.lines.length - 1;
+      return idx;
+    }
+
+    function render(){
+      const s = getStory();
+      if(!s){
+        titleEl.textContent = "準備中";
+        coverImg.src = "/static/img/red_cover.png";
+        lineBox.textContent = "stories.js が読み込めていないか、theme 名が違います。";
+        setStatus("theme=" + THEME, "ng");
+        return;
+      }
+      titleEl.textContent = s.title;
+      coverImg.src = (s.image || ("/static/img/" + THEME + "_cover.png")) + "?t=" + Date.now();
+      clampIndex(s);
+      lineBox.textContent = s.lines[idx];
+      setStatus("");
+    }
+
+    // ✅ 文字だけで必ず進む
+    function nextLineTextOnly(){
+      const s = getStory();
+      if(!s){
+        setStatus("おはなしデータがありません（theme=" + THEME + "）", "ng");
+        return;
+      }
+
+      autoMode = false;
+      autoBtn.textContent = "▶ じどう（音声）：OFF";
+      stopAudio();
+
+      if(idx < s.lines.length - 1){
+        idx++;
+        render();
+      }else{
+        location.href = "/story_end?theme=" + encodeURIComponent(THEME);
+      }
+    }
+
+    // ✅ 自動音声
+    async function playAutoLine(){
+      const s = getStory();
+      if(!s) return;
+
+      stopAudio();
+      const text = s.lines[idx];
+
+      const res = await fetch("/tts", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ text })
+      });
+
+      if(!res.ok){
+        autoMode = false;
+        autoBtn.textContent = "▶ じどう（音声）：OFF";
+        setStatus("読み上げエラー", "ng");
+        return;
+      }
+
+      const blob = await res.blob();
+      const audioUrl  = URL.createObjectURL(blob);
+
+      const a = new Audio(audioUrl);
+      currentAudio = a;
+
+      a.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        if(currentAudio === a) currentAudio = null;
+
+        if(autoMode){
+          if(idx < s.lines.length - 1){
+            idx++;
+            render();
+            playAutoLine();
+          }else{
+            autoMode = false;
+            autoBtn.textContent = "▶ じどう（音声）：OFF";
+            location.href = "/story_end?theme=" + encodeURIComponent(THEME);
+          }
+        }
+      };
+
+      a.play();
+    }
+
+    readBtn.addEventListener("click", nextLineTextOnly);
+
+    autoBtn.addEventListener("click", () => {
+      const s = getStory();
+      if(!s){
+        setStatus("おはなしデータがありません（theme=" + THEME + "）", "ng");
+        return;
+      }
+
+      autoMode = !autoMode;
+      autoBtn.textContent = autoMode ? "▶ じどう（音声）：ON" : "▶ じどう（音声）：OFF";
+      setStatus("");
+
+      if(autoMode){
+        playAutoLine();
+      }else{
+        stopAudio();
+      }
+    });
+
+    stopBtn.addEventListener("click", () => {
+      autoMode = false;
+      autoBtn.textContent = "▶ じどう（音声）：OFF";
+      stopAudio();
+    });
+
+    regenCoverBtn.addEventListener("click", async () => {
+      regenCoverBtn.disabled = true;
+      setStatus("画像を作っています…");
+
+      try{
+        const res = await fetch("/api/generate_cover", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ theme: THEME })
+        });
+        const j = await res.json().catch(()=>null);
+
+        if(!res.ok || !j || !j.ok){
+          const msg = (j && j.error) ? j.error : ("HTTP " + res.status);
+          setStatus("画像生成エラー: " + msg, "ng");
+          return;
+        }
+        coverImg.src = j.path + "?t=" + Date.now();
+        setStatus("画像を更新しました ✅", "ok");
+      }catch(e){
+        setStatus("画像生成エラー: " + String(e), "ng");
+      }finally{
+        regenCoverBtn.disabled = false;
+      }
+    });
+
+    // stories.js の読み込みが遅い場合でも動くように少し待って描画
+    setTimeout(render, 0);
+    setTimeout(render, 200);
+  </script>
+</body>
+</html>

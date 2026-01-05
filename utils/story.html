@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>読み聞かせ</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 18px; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
+    button { padding: 10px 14px; border-radius: 12px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    textarea { width: 100%; min-height: 140px; padding: 10px; border-radius: 12px; border: 1px solid #ccc; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2 style="margin:0 0 10px 0;">🔊 読み聞かせ（女の人の声）</h2>
+
+    <div class="row">
+      <button type="button" onclick="playText('テストです。女の人の声で読みます。')">▶ テスト</button>
+      <button type="button" onclick="stopAudio()">⏹ 停止</button>
+    </div>
+
+    <p style="margin:14px 0 6px 0;">文章：</p>
+    <textarea id="t">むかしむかし、あるところに、やさしい くまさんが いました。</textarea>
+
+    <div class="row">
+      <button type="button" onclick="playText(document.getElementById('t').value)">▶ 読み上げ</button>
+    </div>
+  </div>
+
+  <script>
+    let currentAudio = null;
+
+    function stopAudio(){
+      if (currentAudio){
+        currentAudio.pause();
+        currentAudio = null;
+      }
+    }
+    window.stopAudio = stopAudio;
+
+    async function playText(text){
+      if (!text) return;
+      stopAudio();
+
+      const res = await fetch('/tts', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ text })
+      });
+
+      if (!res.ok){
+        const err = await res.text();
+        alert("TTSエラー:\n" + err);
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      const a = new Audio(url);
+      a.playbackRate = 0.90; // ゆっくり固定
+      currentAudio = a;
+
+      a.onended = () => {
+        URL.revokeObjectURL(url);
+        if (currentAudio === a) currentAudio = null;
+      };
+
+      await a.play();
+    }
+    window.playText = playText;
+  </script>
+</body>
+</html>
