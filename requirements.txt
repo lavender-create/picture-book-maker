@@ -1,4 +1,6 @@
-Flask
-python-dotenv
+flask
 gunicorn
+python-dotenv
 openai==1.54.4
+httpx<0.28
+
