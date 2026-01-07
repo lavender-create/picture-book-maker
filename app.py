@@ -1,6 +1,7 @@
 import os
 import tempfile
 import traceback
+import base64
 
 from flask import Flask, jsonify, send_file, request, render_template
 from dotenv import load_dotenv
@@ -39,7 +40,7 @@ def story():
     theme = request.args.get("theme", "red")
     return render_template("story.html", theme=theme)
 
-# ★★★ ここが重要：おしまい画面 ★★★
+# ★ おしまい画面
 @app.get("/story_end")
 def story_end():
     theme = request.args.get("theme", "red")
@@ -92,7 +93,7 @@ def tts():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # -------------------------
-# 表紙画像生成
+# 表紙画像生成（重要）
 # -------------------------
 @app.post("/api/generate_cover")
 def generate_cover():
@@ -105,16 +106,56 @@ def generate_cover():
         out_path = os.path.join(out_dir, f"{theme}_cover.png")
 
         if client is None:
-            return jsonify({
-                "ok": False,
-                "error": "OpenAI設定がありません"
-            }), 500
+            return jsonify({"ok": False, "error": "OpenAI設定がありません"}), 500
+
+        # ★ テーマ別プロンプト（裸の動物防止）
+        theme_map = {
+            "red": (
+                "『あかずきん』風の絵本表紙。"
+                "森の小道、赤いずきんの雰囲気。"
+                "子ども向け、やさしい表情。"
+            ),
+            "pigs": (
+                "『3びきのこぶた』の絵本表紙。"
+                "子ぶた3びきは【服を着た擬人化キャラクター】。"
+                "帽子・ベスト・エプロンなどを身につけている。"
+                "わらの家・木の家・れんがの家が背景に見える。"
+                "【リアルな豚・裸・肌の質感は禁止】。"
+            ),
+            "bremen": (
+                "『ブレーメンのおんがくたい』の絵本表紙。"
+                "ろば・いぬ・ねこ・にわとりが仲よく行進。"
+                "楽器は小さくかわいく、夜でも安心感のある雰囲気。"
+            ),
+            "peach": (
+                "『ももたろう』風の絵本表紙。"
+                "大きな桃、旅の道具、明るく元気な雰囲気。"
+                "戦い・武器・こわさは描かない。"
+            ),
+            "red_oni": (
+                "『ないたあかおに』風の絵本表紙。"
+                "やさしい赤おに、友情のあたたかい雰囲気。"
+            ),
+        }
+
+        theme_desc = theme_map.get(
+            theme,
+            f"子ども向け絵本の表紙。テーマは『{theme}』。"
+        )
+
+        safety_rules = (
+            "文字は入れない。"
+            "怖さ・暴力・流血表現は禁止。"
+            "人物や動物は丸くかわいいデフォルメ。"
+            "リアルな動物の質感・裸・肌の描写は禁止。"
+            "背景はシンプルで見やすく。"
+        )
 
         prompt = f"""
         子ども向け絵本の表紙イラスト。
-        やさしい水彩、パステル調。
-        テーマ：{theme}
-        文字なし。怖さなし。
+        スタイル：やさしい水彩、パステル調、丸みのあるデザイン。
+        内容：{theme_desc}
+        ルール：{safety_rules}
         """
 
         img = client.images.generate(
@@ -123,10 +164,9 @@ def generate_cover():
             size="1024x1024"
         )
 
-        image_bytes = img.data[0].b64_json
-        import base64
+        image_bytes = base64.b64decode(img.data[0].b64_json)
         with open(out_path, "wb") as f:
-            f.write(base64.b64decode(image_bytes))
+            f.write(image_bytes)
 
         return jsonify({"ok": True, "path": f"/static/img/{theme}_cover.png"})
 
